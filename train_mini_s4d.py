@@ -88,13 +88,13 @@ class MiniS4D(nn.Module):
         # D term (skip connection) — official S4D
         self.D = nn.Parameter(torch.randn(d_model))
 
-        # Core S4 Layer
         self.kernel_gen = S4DKernel(d_model, d_state)
-
-        # Pointwise operations (match official S4D block)
+        
+        # non-linear GELU
         self.activation = nn.GELU()
         self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
-        # position-wise output transform: Conv1d + GLU (official output_linear)
+        
+        
         self.output_linear = nn.Sequential(
             nn.Conv1d(d_model, 2 * d_model, kernel_size=1),
             nn.GLU(dim=-2),
@@ -118,10 +118,10 @@ class MiniS4D(nn.Module):
         
         # 4. Activation + dropout + output_linear (Conv1d + GLU)
         
+        # GLU non-linear
         y = self.dropout(self.activation(y))
-        y = self.output_linear(y)  # (B, d_model, L)
+        y = self.output_linear(y)
 
-        # Pooling / prediction for demo
         return self.decoder(y.mean(dim=-1))
 
     def export_toeplitz(self, head_idx=0):
