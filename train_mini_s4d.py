@@ -119,6 +119,7 @@ class MiniS4D(nn.Module):
         # 4. Activation + dropout + output_linear (Conv1d + GLU)
         
         # GLU non-linear
+        
         y = self.dropout(self.activation(y))
         y = self.output_linear(y)
 
