@@ -19,7 +19,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import tenseal as ts
 
-from train_mini_s4d import MiniS4D, MiniS4D_FHE
+from train_mini_s4d import MiniS4D
 
 
 def adding_problem_sample(seq_len, rng=None):
@@ -113,15 +113,17 @@ def evaluate(model, loader, device, tolerance=0.04):
     context.generate_galois_keys() # enables rotation
     context.global_scale = 2**40 # precision of floating point numbers
 
-    enc_loader = ts.ckks_vector(context, loader)
-
     # evaluate
     with torch.no_grad():
-        for x, y in enc_loader:
-            x, y = x.to(device), y.to(device).unsqueeze(-1)
-            out_enc = model(x)
+        for x, y in loader:
+            y = y.to(device).unsqueeze(-1)
+            print(x.size)
+            x_enc =ts.CKKSTensor(context, x)
+            print("encrypted")
+            out_enc = model(x_enc, context=context)
             # decrypt the output of the model
             out = out_enc.decrypt()
+            print("decrypted")
 
             # calculate stats
             mse = nn.functional.mse_loss(out, y, reduction="sum").item()
