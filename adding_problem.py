@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+import tenseal as ts
 
 from train_mini_s4d import MiniS4D, MiniS4D_FHE
 
@@ -102,10 +103,27 @@ def evaluate(model, loader, device, tolerance=0.04):
     total_mse = 0.0
     correct = 0
     n = 0
+
+    # encrypt the test_loader
+    context = ts.context(
+        ts.SCHEME_TYPE.CKKS,
+        poly_modulus_degree=8192, # security level/computational load, 8192 is common value
+        coeff_mod_bit_sizes=[60, 40, 40, 60] # prime number bit sizes that form coefficient modulus, # of elements in the list controls the multiplicative depth, common value
+    )
+    context.generate_galois_keys() # enables rotation
+    context.global_scale = 2**40 # precision of floating point numbers
+
+    enc_loader = ts.ckks_vector(context, loader)
+
+    # evaluate
     with torch.no_grad():
-        for x, y in loader:
+        for x, y in enc_loader:
             x, y = x.to(device), y.to(device).unsqueeze(-1)
-            out = model(x)
+            out_enc = model(x)
+            # decrypt the output of the model
+            out = out_enc.decrypt()
+
+            # calculate stats
             mse = nn.functional.mse_loss(out, y, reduction="sum").item()
             total_mse += mse
             within = (out - y).abs().squeeze(-1) < tolerance
@@ -151,8 +169,6 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False)
     test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False)
-
-    
 
     # If a checkpoint is provided, try to infer d_model/d_state from it to avoid shape mismatch.
     ckpt_state = None
