@@ -101,29 +101,51 @@ class MiniS4D(nn.Module):
         )
         self.decoder = nn.Linear(d_model, 1)  # Simple regression head for demo
 
-    def forward(self, u):
+    def forward(self, u, context = None):
         """
         u: (Batch, d_model, L)
         """
         # 1. Generate Kernel (ZOH based)
-        K = self.kernel_gen(self.L)  # (d_model, L)
+        if context is None:
+            K = self.kernel_gen(self.L)  # (d_model, L)
 
-        # 2. Convolution (causal)
-        k_conv = K.unsqueeze(1)  # (H, 1, L)
-        y = torch.nn.functional.conv1d(u, k_conv, padding=self.L - 1, groups=self.d_model)
-        y = y[:, :, : self.L]  # Causal slice
+            # 2. Convolution (causal)
+            k_conv = K.unsqueeze(1)  # (H, 1, L)
+            y = torch.nn.functional.conv1d(u, k_conv, padding=self.L - 1, groups=self.d_model)
+            y = y[:, :, : self.L]  # Causal slice
 
-        # 3. D term (skip connection) — official S4D
-        y = y + u * self.D.unsqueeze(-1)
-        
-        # 4. Activation + dropout + output_linear (Conv1d + GLU)
-        
-        # GLU non-linear
-        
-        y = self.dropout(self.activation(y))
-        y = self.output_linear(y)
+            # 3. D term (skip connection) — official S4D
+            y = y + u * self.D.unsqueeze(-1)
+            
+            # 4. Activation + dropout + output_linear (Conv1d + GLU)
+            
+            # GLU non-linear
 
-        return self.decoder(y.mean(dim=-1))
+            y = self.dropout(self.activation(y))
+            y = self.output_linear(y)
+
+            return self.decoder(y.mean(dim=-1))
+
+        else:
+            T = self.export_toeplitz()
+            y = u.matmul(T.tolist()) 
+            y = y + (u * self.D.detach().cpu().numpy().tolist())
+
+            y_plain = torch.tensor(y.decrypt())
+            y_activated = self.activation(y_plain)
+            y = tenseal.ckks_tensor(context, y_activated.tolist())
+            
+            conv_weight = self.output_linear[0].weight.detach().cpu().squeeze(-1).numpy().T
+            conv_bias = self.output_linear[0].bias.detach().cpu().numpy().tolist()
+            
+            y = y.matmul(conv_weight.tolist()) + conv_bias
+            
+            y_plain = torch.tensor(y.decrypt())
+            y = torch.nn.functional.glu(y_plain, dim=-2) # dim=-2 is channel dim here
+            
+            out = self.decoder(y.mean(dim=-1))
+            return out
+        
 
     def export_toeplitz(self, head_idx=0):
         """
