@@ -105,7 +105,7 @@ class MiniS4D(nn.Module):
         """
         u: (Batch, d_model, L)
         """
-        # 1. Generate Kernel (ZOH based)
+        # 1. Generate Kernel (ZOH based) 
         if context is None:
             K = self.kernel_gen(self.L)  # (d_model, L)
 
@@ -128,22 +128,27 @@ class MiniS4D(nn.Module):
 
         else:
             T = self.export_toeplitz()
-            y = u.matmul(T.tolist()) 
-            y = y + (u * self.D.detach().cpu().numpy().tolist())
+            y = u.mm(T.tolist())
+            y = y + (u * self.D.data().cpu().numpy().tolist())
 
             y_plain = torch.tensor(y.decrypt())
+            print("decrypted")
             y_activated = self.activation(y_plain)
             y = tenseal.ckks_tensor(context, y_activated.tolist())
+            print("reencrypted")
             
             conv_weight = self.output_linear[0].weight.detach().cpu().squeeze(-1).numpy().T
             conv_bias = self.output_linear[0].bias.detach().cpu().numpy().tolist()
             
-            y = y.matmul(conv_weight.tolist()) + conv_bias
+            y = y.mm(conv_weight.tolist()) + conv_bias
             
             y_plain = torch.tensor(y.decrypt())
+            print("decrypted")
             y = torch.nn.functional.glu(y_plain, dim=-2) # dim=-2 is channel dim here
+            y = tenseal.ckks_tensor(context, y.tolist())
+            print("reencrypted")
             
-            out = self.decoder(y.mean(dim=-1))
+            out = self.decoder(y.sum() / (1.0 * y.shape[0]))
             return out
         
 
@@ -161,85 +166,6 @@ class MiniS4D(nn.Module):
                 for j in range(i + 1):
                     T[i, j] = k_np[i-j]
             return T
-
-
-class MiniS4D_FHE(nn.Module):
-    """
-    FHE-Compatible S4D Model.
-    Optimized for Homomorphic Encryption by removing expensive non-linearities.
-    """
-    def __init__(self, d_model, d_state=64, L=64, dropout=0.0):
-        super().__init__()
-        self.d_model = d_model
-        self.d_state = d_state
-        self.L = L
-
-        # S4 Generator
-        self.kernel_gen = S4DKernel(d_model, d_state=d_state)
-
-        # Skip Connection
-        self.D = nn.Parameter(torch.randn(d_model))
-
-        # Output Projection (Changed: GLU --> Linear), as the original used complex GLU.
-        self.output_linear = nn.Linear(d_model, d_model)
-
-        # Final Decoder (Unchanged)
-        self.decoder = nn.Linear(d_model, 1)
-
-    def forward(self, u):
-        """
-        Input u: (Batch, d_model, Length)
-        Output:  (Batch, 1)
-        """
-        # Kernel
-        k = self.kernel_gen(self.L)
-        
-        # Reshape for torch.conv1d
-        k_conv = k.unsqueeze(1) 
-        
-        # Apply Convolution
-        y = nn.functional.conv1d(u, k_conv, padding=self.L - 1, groups=self.d_model)
-        y = y[:, :, :self.L]
-
-        # Skip Connection
-        y = y + u * self.D.unsqueeze(-1)
-
-        # Activation (Changed: GELU --> Square)
-        y = y * y 
-
-        # Output Projection (Changed: GLU -> Linear)
-        y = y.transpose(-1, -2) # (B, L, H)
-        y = self.output_linear(y)
-        y = y.transpose(-1, -2) # (B, H, L)
-
-        # Pooling
-        y_pooled = y.mean(dim=-1) # (B, H)
-
-        # Final Prediction
-        out = self.decoder(y_pooled) # (B, 1)
-        
-        return out
-    
-    def export_toeplitz(self):
-        """
-        Export the learned S4 kernel as a list of Toeplitz matrices (one per channel).
-        Returns list of np.array, each shape (L, L)
-        """
-
-        with torch.no_grad():
-            K = self.kernel_gen(self.L)
-        
-        matrices = []
-        for c in range(self.d_model):
-            k_c = K[c].cpu().numpy()
-            col = k_c
-            row = np.zeros_like(k_c)
-            row[0] = k_c[0]
-            
-            T = toeplitz(col, row)
-            matrices.append(T)
-            
-        return matrices
 
 
 if __name__ == "__main__":
