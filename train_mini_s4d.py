@@ -129,7 +129,7 @@ class MiniS4D(nn.Module):
         else:
             T = self.export_toeplitz()
             y = u.mm(T.tolist())
-            y = y + (u * self.D.data().cpu().numpy().tolist())
+            y = y + (u * self.D.detach().cpu().numpy().repeat(self.L))
 
             y_plain = torch.tensor(y.decrypt())
             print("decrypted")
@@ -143,12 +143,14 @@ class MiniS4D(nn.Module):
             y = y.mm(conv_weight.tolist()) + conv_bias
             
             y_plain = torch.tensor(y.decrypt())
+            y_plain = y_plain.reshape(1, 2 * self.d_model, self.L)
+            
             print("decrypted")
-            y = torch.nn.functional.glu(y_plain, dim=-2) # dim=-2 is channel dim here
+            y = torch.nn.functional.glu(y_plain, dim=1) # dim=-2 is channel dim here
             y = tenseal.ckks_tensor(context, y.tolist())
             print("reencrypted")
             
-            out = self.decoder(y.sum() / (1.0 * y.shape[0]))
+            out = self.decoder(y.mean(dim=-1))
             return out
         
 
