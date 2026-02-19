@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from scipy.linalg import toeplitz
+from scipy.linalg import toeplitz, block_diag
+
 import tenseal
 
 class S4DKernel(nn.Module):
@@ -105,7 +106,7 @@ class MiniS4D(nn.Module):
         """
         u: (Batch, d_model, L)
         """
-        # 1. Generate Kernel (ZOH based) 
+        # 1. Generate Kernel (ZOH based)
         if context is None:
             K = self.kernel_gen(self.L)  # (d_model, L)
 
@@ -127,32 +128,27 @@ class MiniS4D(nn.Module):
             return self.decoder(y.mean(dim=-1))
 
         else:
-            T = self.export_toeplitz()
-            y = u.mm(T.tolist())
-            y = y + (u * self.D.detach().cpu().numpy().repeat(self.L))
+            T = block_diag(*[self.export_toeplitz(h) for h in range(self.d_model)])
+            # ERROR: need Galois keys for rotation -- way to avoid?
+            y = u.matmul(T.tolist())
+            y = y + (u * self.D.detach().cpu().numpy().repeat(self.L).tolist())
 
             y_plain = torch.tensor(y.decrypt())
-            print("decrypted")
             y_activated = self.activation(y_plain)
-            y = tenseal.ckks_tensor(context, y_activated.tolist())
-            print("reencrypted")
-            
-            conv_weight = self.output_linear[0].weight.detach().cpu().squeeze(-1).numpy().T
+            y = tenseal.ckks_vector(context, y_activated.tolist())
+
+            conv_weight = self.output_linear[0].weight.detach().cpu().squeeze(-1).numpy().T()
             conv_bias = self.output_linear[0].bias.detach().cpu().numpy().tolist()
-            
-            y = y.mm(conv_weight.tolist()) + conv_bias
-            
-            y_plain = torch.tensor(y.decrypt())
-            y_plain = y_plain.reshape(1, 2 * self.d_model, self.L)
-            
-            print("decrypted")
-            y = torch.nn.functional.glu(y_plain, dim=1) # dim=-2 is channel dim here
-            y = tenseal.ckks_tensor(context, y.tolist())
-            print("reencrypted")
-            
-            out = self.decoder(y.mean(dim=-1))
+            # ERROR: shapes of y and conv_weight don't match -- where is the disparity??
+            y = y.matmul(conv_weight.tolist()) + conv_bias
+
+            y_plain = torch.tensor(y.decrypt(), dtype=torch.float64).reshape(2 * self.d_model, self.L)
+            y_plain = torch.nn.functional.glu(y_plain, dim=0)
+            y_plain = y_plain.reshape(self.d_model, self.L)
+            out_plain = self.decoder(y_plain.mean(dim=-1))
+            out = tenseal.ckks_vector(context, out_plain.detach().flatten().tolist())
             return out
-        
+
 
     def export_toeplitz(self, head_idx=0):
         """
@@ -161,7 +157,7 @@ class MiniS4D(nn.Module):
         with torch.no_grad():
             K = self.kernel_gen(self.L)
             k_np = K[head_idx].cpu().numpy()
-            
+
             # Construct Toeplitz
             T = np.zeros((self.L, self.L))
             for i in range(self.L):

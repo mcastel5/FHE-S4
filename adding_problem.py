@@ -103,27 +103,11 @@ def evaluate(model, loader, device, tolerance=0.04):
     total_mse = 0.0
     correct = 0
     n = 0
-
-    # encrypt the test_loader
-    context = ts.context(
-        ts.SCHEME_TYPE.CKKS,
-        poly_modulus_degree=8192, # security level/computational load, 8192 is common value
-        coeff_mod_bit_sizes=[60, 40, 40, 60] # prime number bit sizes that form coefficient modulus, # of elements in the list controls the multiplicative depth, common value
-    )
-    context.generate_galois_keys() # enables rotation
-    context.global_scale = 2**40 # precision of floating point numbers
-
-    # evaluate
+    
     with torch.no_grad():
         for x, y in loader:
-            y = y.to(device).unsqueeze(-1)
-            print(x.size)
-            x_enc =ts.CKKSTensor(context, x)
-            print("encrypted")
-            out_enc = model(x_enc, context=context)
-            # decrypt the output of the model
-            out = out_enc.decrypt()
-            print("decrypted")
+            x, y = x.to(device), y.to(device).unsqueeze(-1)
+            out = model(x)
 
             # calculate stats
             mse = nn.functional.mse_loss(out, y, reduction="sum").item()

@@ -6,13 +6,13 @@ from pathlib import Path
 import numpy as np
 import tenseal as ts
 import torch
+from tenseal_context import make_ckks_context
 
 # Allow running as: python scripts/run_inference_fhe_shell.py
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from fhe.tenseal_context import make_ckks_context
 
 try:
     # Common package-style layout.
@@ -101,7 +101,7 @@ def main() -> None:
 
     if args.mode in ("fhe", "both"):
         assert ctx is not None
-        flat_x = x_np.reshape(-1).astype(np.float64)
+        flat_x = x_np.T.reshape(-1).astype(np.float64)
         bias_flat = np.full(seq_len * d_model, 0.01, dtype=np.float64)
         params = {"bias_flat": bias_flat}
 
@@ -113,7 +113,7 @@ def main() -> None:
         t3 = time.perf_counter()
 
         t4 = time.perf_counter()
-        y_enc = fhe_forward_stub(x_enc, seq_len=seq_len, d_model=d_model, params=params)
+        y_enc = model(x_enc, context=ctx)
         t5 = time.perf_counter()
 
         t6 = time.perf_counter()
