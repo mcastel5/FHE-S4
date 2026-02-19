@@ -33,21 +33,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def fhe_forward_stub(
-    x_enc: ts.CKKSVector, seq_len: int, d_model: int, params: dict
-) -> ts.CKKSVector:
-    """Minimal encrypted forward stub.
-
-    TODO: Replace bias-add stub with encrypted linear operations from S4D (Toeplitz/conv).
-    TODO: Cache plaintext constants outside the per-call path.
-    """
-    expected = seq_len * d_model
-    bias_flat = np.asarray(params["bias_flat"], dtype=np.float64)
-    if bias_flat.shape != (expected,):
-        raise ValueError(f"bias_flat must have shape ({expected},), got {bias_flat.shape}")
-    return x_enc + bias_flat.tolist()
-
-
 def main() -> None:
     args = parse_args()
 
