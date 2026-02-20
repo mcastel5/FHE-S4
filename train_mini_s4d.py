@@ -129,7 +129,7 @@ class MiniS4D(nn.Module):
 
         else:
             T = block_diag(*[self.export_toeplitz(h) for h in range(self.d_model)])
-            # ERROR: need Galois keys for rotation -- way to avoid?
+            # ERROR: need Galois keys for rotation -- way to avoid? -- need_galois = True in context creation
             y = u.matmul(T.tolist())
             y = y + (u * self.D.detach().cpu().numpy().repeat(self.L).tolist())
 
@@ -137,15 +137,17 @@ class MiniS4D(nn.Module):
             y_activated = self.activation(y_plain)
             y = tenseal.ckks_vector(context, y_activated.tolist())
 
-            conv_weight = self.output_linear[0].weight.detach().cpu().squeeze(-1).numpy().T()
+            conv_weight = self.output_linear[0].weight.detach().cpu().squeeze(-1).numpy().T
             conv_bias = self.output_linear[0].bias.detach().cpu().numpy().tolist()
-            # ERROR: shapes of y and conv_weight don't match -- where is the disparity??
-            y = y.matmul(conv_weight.tolist()) + conv_bias
+            # ERROR: shapes of y and conv_weight don't match -- where is the disparity?? -- fixed: expanded size of weight and bias
+            big_weight = block_diag(*[conv_weight for __ in range(self.L)])
+            big_bias = np.tile(conv_bias, self.L)
+            y = y.matmul(big_weight.tolist()) + big_bias.tolist()
 
             y_plain = torch.tensor(y.decrypt(), dtype=torch.float64).reshape(2 * self.d_model, self.L)
             y_plain = torch.nn.functional.glu(y_plain, dim=0)
             y_plain = y_plain.reshape(self.d_model, self.L)
-            out_plain = self.decoder(y_plain.mean(dim=-1))
+            out_plain = self.decoder(y_plain.mean(dim=-1).float())
             out = tenseal.ckks_vector(context, out_plain.detach().flatten().tolist())
             return out
 

@@ -78,7 +78,7 @@ def main() -> None:
         t_ctx0 = time.perf_counter()
         ctx = make_ckks_context(
             poly_modulus_degree=args.poly_modulus_degree,
-            need_galois=False,
+            need_galois=True,
             need_relin=False,
         )
         t_ctx1 = time.perf_counter()
@@ -117,11 +117,10 @@ def main() -> None:
         t5 = time.perf_counter()
 
         t6 = time.perf_counter()
-        y_dec_flat = np.array(y_enc.decrypt(), dtype=np.float64)
+        y_dec = np.array(y_enc.decrypt(), dtype=np.float64)
         t7 = time.perf_counter()
 
-        y_dec = y_dec_flat.reshape(seq_len, d_model)
-        max_abs_diff = float(np.max(np.abs(y_dec_flat - y_stub_plain_flat)))
+        max_abs_diff = float(np.max(np.abs(y_dec - y_stub_plain_flat)))
 
         print(f"[fhe] flat_input_len: {flat_x.shape[0]}")
         print(f"[fhe] decrypted_output_shape: {tuple(y_dec.shape)}")
