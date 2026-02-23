@@ -7,12 +7,12 @@ import tenseal as ts
 
 class FHELinear:
     def __init__(self, context: ts.Context, W: np.ndarray, b: Optional[np.ndarray] = None):
-        if W.ndim != 2 or W.shape[0] != W.shape[1]:
+        if W.ndim != 2: #or W.shape[0] != W.shape[1]:
             raise ValueError("W must be a square matrix of shape (d, d).")
         self.context = context
         self.W = np.asarray(W, dtype=np.float64)
         self.b = None if b is None else np.asarray(b, dtype=np.float64)
-        if self.b is not None and self.b.shape != (self.W.shape[0],):
+        if self.b is not None and self.b.shape != (self.W.shape[1],): # self.W.shape[0] --> self.W.shape[1]
             raise ValueError("b must have shape (d,).")
         self._W_list = self.W.tolist()
         self._b_list = None if self.b is None else self.b.tolist()

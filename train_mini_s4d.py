@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from scipy.linalg import toeplitz, block_diag
+from fhe_linear_demo import FHELinear
 
 import tenseal
 
@@ -129,7 +130,7 @@ class MiniS4D(nn.Module):
 
         else:
             T = block_diag(*[self.export_toeplitz(h) for h in range(self.d_model)])
-            # ERROR: need Galois keys for rotation -- way to avoid? -- need_galois = True in context creation
+            # ERROR: need Galois keys for rotation -- way to avoid? -- fixed: need_galois = True in context creation
             y = u.matmul(T.tolist())
             y = y + (u * self.D.detach().cpu().numpy().repeat(self.L).tolist())
 
@@ -147,8 +148,21 @@ class MiniS4D(nn.Module):
             y_plain = torch.tensor(y.decrypt(), dtype=torch.float64).reshape(2 * self.d_model, self.L)
             y_plain = torch.nn.functional.glu(y_plain, dim=0)
             y_plain = y_plain.reshape(self.d_model, self.L)
-            out_plain = self.decoder(y_plain.mean(dim=-1).float())
-            out = tenseal.ckks_vector(context, out_plain.detach().flatten().tolist())
+            y = tenseal.ckks_vector(context, y_plain.detach().flatten().tolist())
+
+            # FHE-friendly linear decoder:
+            # original:
+            #       out_plain = self.decoder(y_plain.mean(dim=-1).float())
+            # mean pooling:
+            avg_row = np.ones((1, self.L)) / self.L
+            mean_matrix = block_diag(*[avg_row for _ in range(self.d_model)]).T
+            y_mean = y.matmul(mean_matrix.tolist())
+            # linear pass
+            dec_weight = self.decoder.weight.detach().cpu().numpy().T  # (d_model, d_out)
+            dec_bias = self.decoder.bias.detach().cpu().numpy()
+            FHE_decoder = FHELinear(context, dec_weight, dec_bias)
+            out = FHE_decoder(y_mean)
+
             return out
 
 
