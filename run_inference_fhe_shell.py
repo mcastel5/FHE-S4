@@ -84,7 +84,7 @@ def main() -> None:
         t_ctx1 = time.perf_counter()
         print(f"[fhe] context_creation_time_s: {t_ctx1 - t_ctx0:.6f}")
 
-    if args.mode in ("plain", "both"):
+    if args.mode in ("plain"):
         with torch.no_grad():
             t0 = time.perf_counter()
             y_plain_model = model(x_torch)
@@ -98,16 +98,13 @@ def main() -> None:
             f"mean={float(y_plain_np.mean()):.6e}, std={float(y_plain_np.std()):.6e}, "
             f"min={float(y_plain_np.min()):.6e}, max={float(y_plain_np.max()):.6e}"
         )
+        print(f"[plain] {y_plain_np}")
 
     if args.mode in ("fhe", "both"):
         assert ctx is not None
         flat_x = x_np.T.reshape(-1).astype(np.float64)
-        bias_flat = np.full(seq_len * d_model, 0.01, dtype=np.float64)
-        params = {"bias_flat": bias_flat}
-
-        # Plaintext equivalent for stub validation.
-        y_stub_plain_flat = flat_x + bias_flat
-
+        #bias_flat = np.full(seq_len * d_model, 0.01, dtype=np.float64)
+        
         t2 = time.perf_counter()
         x_enc = ts.ckks_vector(ctx, flat_x.tolist())
         t3 = time.perf_counter()
@@ -120,14 +117,35 @@ def main() -> None:
         y_dec = np.array(y_enc.decrypt(), dtype=np.float64)
         t7 = time.perf_counter()
 
-        max_abs_diff = float(np.max(np.abs(y_dec - y_stub_plain_flat)))
+        if args.mode in ("both"):
+            with torch.no_grad():
+                t0 = time.perf_counter()
+                y_plain_model = model(x_torch)
+                t1 = time.perf_counter()
+            y_plain_np = y_plain_model.detach().cpu().numpy()
+            print(f"[plain] input_shape: {tuple(x_torch.shape)}")
+            print(f"[plain] output_shape: {tuple(y_plain_np.shape)}")
+            print(f"[plain] forward_time_s: {t1 - t0:.6f}")
+            print(
+                "[plain] output_stats: "
+                f"mean={float(y_plain_np.mean()):.6e}, std={float(y_plain_np.std()):.6e}, "
+                f"min={float(y_plain_np.min()):.6e}, max={float(y_plain_np.max()):.6e}"
+            )
+            print(f"[plain] {y_plain_np}")
+
+            max_abs_diff = float(np.max(np.abs(y_dec - y_plain_np)))
+            mae = np.mean(np.abs(y_dec - y_plain_np))
+            mse = np.mean((y_dec - y_plain_np) ** 2)
+            print(f"[fhe] max_abs_diff_vs_plain: {max_abs_diff:.6e}")
+            print(f"[fhe] mean absolute error: {mae}")
+            print(f"[fhe] mean square error: {mse}")
 
         print(f"[fhe] flat_input_len: {flat_x.shape[0]}")
         print(f"[fhe] decrypted_output_shape: {tuple(y_dec.shape)}")
         print(f"[fhe] encrypt_time_s: {t3 - t2:.6f}")
         print(f"[fhe] fhe_op_time_s: {t5 - t4:.6f}")
         print(f"[fhe] decrypt_time_s: {t7 - t6:.6f}")
-        print(f"[fhe] max_abs_diff_vs_plain_stub: {max_abs_diff:.6e}")
+        print(f"[fhe] {y_dec}")
 
 
 if __name__ == "__main__":
